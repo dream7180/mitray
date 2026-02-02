@@ -1,7 +1,7 @@
 ;==============================================================================
-; Clash Tray - Windows System Tray Tool
+; MiTray
 ; AutoHotkey v2.0+
-; Description: Manage mihomo proxy core with system tray interface
+; Description: Manage mihomo core with system tray interface
 ;==============================================================================
 
 #Requires AutoHotkey v2.0+
