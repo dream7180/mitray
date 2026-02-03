@@ -40,6 +40,8 @@ global AutoStartCore := true
 global IsProxyEnabled := false
 global IsTUNEnabled := false
 global IsAutoStartup := false
+global AutoStartupLevel := ""  ; "normal" 或 "admin"
+global AutoStartupMenu := 0  ; 开机自启子菜单对象
 global StatusCheckTimer := 0
 
 ;==============================================================================
@@ -165,6 +167,8 @@ ParseMihomoConfig(configPath) {
 ; Tray Menu Setup
 ;==============================================================================
 SetupTrayMenu() {
+    global AutoStartupMenu
+
     ; Remove default menu items
     A_TrayMenu.Delete()
 
@@ -175,7 +179,13 @@ SetupTrayMenu() {
     A_TrayMenu.Add("启用 TUN 模式", MenuToggleTUN)
     A_TrayMenu.Add()  ; Separator
     A_TrayMenu.Add("刷新状态", MenuRefreshStatus)
-    A_TrayMenu.Add("开机自启", MenuToggleAutoStartup)
+
+    ; 创建开机自启子菜单
+    AutoStartupMenu := Menu()
+    AutoStartupMenu.Add("普通权限", MenuAutoStartupNormal)
+    AutoStartupMenu.Add("管理员权限", MenuAutoStartupAdmin)
+    A_TrayMenu.Add("开机自启", AutoStartupMenu)
+
     A_TrayMenu.Add()  ; Separator
     A_TrayMenu.Add("打开程序目录", MenuOpenScriptDir)
     A_TrayMenu.Add("打开核心目录", MenuOpenCoreDir)
@@ -203,11 +213,18 @@ UpdateMenuStates() {
         A_TrayMenu.Uncheck("启用 TUN 模式")
     }
 
-    ; Update auto-startup checkbox
-    if (IsAutoStartup) {
-        A_TrayMenu.Check("开机自启")
-    } else {
-        A_TrayMenu.Uncheck("开机自启")
+    ; Update auto-startup checkboxes
+    if (AutoStartupMenu) {
+        if (AutoStartupLevel = "normal") {
+            AutoStartupMenu.Check("普通权限")
+            AutoStartupMenu.Uncheck("管理员权限")
+        } else if (AutoStartupLevel = "admin") {
+            AutoStartupMenu.Uncheck("普通权限")
+            AutoStartupMenu.Check("管理员权限")
+        } else {
+            AutoStartupMenu.Uncheck("普通权限")
+            AutoStartupMenu.Uncheck("管理员权限")
+        }
     }
 }
 
@@ -266,11 +283,19 @@ MenuRefreshStatus(*) {
     ShowNotification("状态刷新", "已刷新系统代理和 TUN 状态", 2)
 }
 
-MenuToggleAutoStartup(*) {
-    if (IsAutoStartup) {
+MenuAutoStartupNormal(*) {
+    if (AutoStartupLevel = "normal") {
         DisableAutoStartup()
     } else {
-        EnableAutoStartup()
+        EnableAutoStartup("normal")
+    }
+}
+
+MenuAutoStartupAdmin(*) {
+    if (AutoStartupLevel = "admin") {
+        DisableAutoStartup()
+    } else {
+        EnableAutoStartup("admin")
     }
 }
 
@@ -759,49 +784,106 @@ DisableTUNMode() {
 }
 
 ;==============================================================================
-; Auto-startup Management
+; Auto-startup Management (使用任务计划程序)
 ;==============================================================================
 CheckAutoStartup() {
-    global IsAutoStartup, ScriptBaseName
+    global IsAutoStartup, AutoStartupLevel, ScriptBaseName
 
     try {
-        regValue := RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\Run", ScriptBaseName)
-        IsAutoStartup := true
+        ; 检查任务计划程序中是否存在任务
+        cmd := 'schtasks /Query /TN "' . ScriptBaseName . '" /FO LIST /V'
+        result := RunWaitOne(cmd)
+
+        if (InStr(result, ScriptBaseName)) {
+            IsAutoStartup := true
+
+            ; 检查是否以最高权限运行
+            if (InStr(result, "Highest") || InStr(result, "最高权限")) {
+                AutoStartupLevel := "admin"
+            } else {
+                AutoStartupLevel := "normal"
+            }
+        } else {
+            IsAutoStartup := false
+            AutoStartupLevel := ""
+        }
     } catch {
         IsAutoStartup := false
+        AutoStartupLevel := ""
     }
 
     UpdateMenuStates()
 }
 
-EnableAutoStartup() {
-    global IsAutoStartup, ScriptBaseName
+EnableAutoStartup(level := "normal") {
+    global IsAutoStartup, AutoStartupLevel, ScriptBaseName
 
     try {
-        ; Get executable path (if compiled) or script path
+        ; 先删除已存在的任务（如果有）
+        DisableAutoStartup()
+
+        ; 获取可执行文件路径
         exePath := A_IsCompiled ? A_ScriptFullPath : A_ScriptFullPath
 
-        RegWrite('"' . exePath . '"', "REG_SZ", "HKCU\Software\Microsoft\Windows\CurrentVersion\Run", ScriptBaseName)
+        ; 根据权限级别设置不同的参数
+        if (level = "admin") {
+            ; 创建以最高权限运行的任务
+            cmd := 'schtasks /Create /TN "' . ScriptBaseName . '" '
+                . '/TR "\"' . exePath . '\"" '
+                . '/SC ONLOGON '
+                . '/RL HIGHEST '
+                . '/F'
 
-        IsAutoStartup := true
-        UpdateMenuStates()
-        ShowNotification("开机自启", "已启用开机自启动", 2)
+            levelText := "管理员权限"
+        } else {
+            ; 创建普通权限运行的任务
+            cmd := 'schtasks /Create /TN "' . ScriptBaseName . '" '
+                . '/TR "\"' . exePath . '\"" '
+                . '/SC ONLOGON '
+                . '/RL LIMITED '
+                . '/F'
+
+            levelText := "普通权限"
+        }
+
+        ; 执行命令
+        result := RunWaitOne(cmd)
+
+        ; 检查是否成功
+        if (InStr(result, "SUCCESS") || InStr(result, "成功")) {
+            IsAutoStartup := true
+            AutoStartupLevel := level
+            UpdateMenuStates()
+            ShowNotification("开机自启", "已启用开机自启动 (" . levelText . ")", 2)
+        } else {
+            ShowNotification("错误", "启用开机自启失败", 2)
+        }
     } catch as err {
         ShowNotification("错误", "启用开机自启失败: " . err.Message, 2)
     }
 }
 
 DisableAutoStartup() {
-    global IsAutoStartup, ScriptBaseName
+    global IsAutoStartup, AutoStartupLevel, ScriptBaseName
 
     try {
-        RegDelete("HKCU\Software\Microsoft\Windows\CurrentVersion\Run", ScriptBaseName)
+        ; 删除任务计划程序中的任务
+        cmd := 'schtasks /Delete /TN "' . ScriptBaseName . '" /F'
+        result := RunWaitOne(cmd)
 
         IsAutoStartup := false
+        AutoStartupLevel := ""
         UpdateMenuStates()
-        ShowNotification("开机自启", "已禁用开机自启动", 2)
+
+        ; 只有在任务存在时才显示成功通知
+        if (InStr(result, "SUCCESS") || InStr(result, "成功")) {
+            ShowNotification("开机自启", "已禁用开机自启动", 2)
+        }
     } catch as err {
-        ShowNotification("错误", "禁用开机自启失败: " . err.Message, 2)
+        ; 忽略删除不存在任务的错误
+        IsAutoStartup := false
+        AutoStartupLevel := ""
+        UpdateMenuStates()
     }
 }
 
@@ -811,4 +893,14 @@ DisableAutoStartup() {
 ShowNotification(title, message, duration := 2) {
     TrayTip(message, title, 0x1)
     SetTimer(() => TrayTip(), -duration * 1000)
+}
+
+RunWaitOne(command) {
+    shell := ComObject("WScript.Shell")
+    exec := shell.Exec(A_ComSpec " /C " . command)
+
+    ; 等待命令完成并读取输出
+    output := exec.StdOut.ReadAll()
+
+    return output
 }
