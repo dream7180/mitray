@@ -825,87 +825,40 @@ EnableAutoStartup(level := "normal") {
         ; 获取可执行文件路径
         exePath := A_IsCompiled ? A_ScriptFullPath : A_ScriptFullPath
 
-        ; 获取当前用户名
-        userName := A_UserName
-
         ; 设置权限级别
-        runLevel := (level = "admin") ? "HighestAvailable" : "LeastPrivilege"
+        runLevel := (level = "admin") ? "Highest" : "Limited"
         levelText := (level = "admin") ? "管理员权限" : "普通权限"
 
-        ; 创建临时 XML 文件路径
-        xmlPath := A_Temp . "\mitray_task.xml"
-
-        ; 生成 XML 配置内容
-        xmlContent := '
+        ; 构建 PowerShell 脚本
+        ; 使用 Register-ScheduledTask cmdlet 创建任务
+        psScript := '
 (
-<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo>
-    <Description>MiTray 开机自启动</Description>
-  </RegistrationInfo>
-  <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-      <UserId>' . userName . '</UserId>
-    </LogonTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <UserId>' . userName . '</UserId>
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>' . runLevel . '</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowHardTerminate>true</AllowHardTerminate>
-    <StartWhenAvailable>false</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <IdleSettings>
-      <StopOnIdleEnd>false</StopOnIdleEnd>
-      <RestartOnIdle>false</RestartOnIdle>
-    </IdleSettings>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <Enabled>true</Enabled>
-    <Hidden>false</Hidden>
-    <RunOnlyIfIdle>false</RunOnlyIfIdle>
-    <WakeToRun>false</WakeToRun>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Priority>7</Priority>
-  </Settings>
-  <Actions Context="Author">
-    <Exec>
-      <Command>' . exePath . '</Command>
-    </Exec>
-  </Actions>
-</Task>
+$action = New-ScheduledTaskAction -Execute "' . exePath . '"
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -DontStopOnIdleEnd `
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
+    -AllowStartOnDemand
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel ' . runLevel . '
+Register-ScheduledTask -TaskName "' . ScriptBaseName . '" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+if ($?) { Write-Output "SUCCESS" } else { Write-Output "FAILED" }
 )'
 
-        ; 写入 XML 文件
-        if FileExist(xmlPath) {
-            FileDelete(xmlPath)
-        }
-        FileAppend(xmlContent, xmlPath, "UTF-16")
-
-        ; 使用 XML 文件创建任务
-        cmd := 'schtasks /Create /TN "' . ScriptBaseName . '" /XML "' . xmlPath . '" /F'
+        ; 执行 PowerShell 命令
+        cmd := 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "' . psScript . '"'
         result := RunWaitOne(cmd)
 
-        ; 删除临时 XML 文件
-        if FileExist(xmlPath) {
-            FileDelete(xmlPath)
-        }
-
         ; 检查是否成功
-        if (InStr(result, "SUCCESS") || InStr(result, "成功")) {
+        if (InStr(result, "SUCCESS")) {
             IsAutoStartup := true
             AutoStartupLevel := level
             UpdateMenuStates()
             ShowNotification("开机自启", "已启用开机自启动 (" . levelText . ")", 2)
         } else {
-            ShowNotification("错误", "启用开机自启失败", 2)
+            ShowNotification("错误", "启用开机自启失败`n" . result, 5)
         }
     } catch as err {
         ShowNotification("错误", "启用开机自启失败: " . err.Message, 2)
