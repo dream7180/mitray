@@ -11,6 +11,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write  # 允许创建 releases 和上传 artifacts
+
 jobs:
   build:
     runs-on: windows-latest
