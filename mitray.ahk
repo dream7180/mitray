@@ -4,6 +4,8 @@
 ; Description: Manage mihomo core with system tray interface
 ;==============================================================================
 
+;@Ahk2Exe-SetMainIcon idle.ico
+
 #Requires AutoHotkey v2.0+
 #SingleInstance Force
 Persistent
@@ -21,10 +23,10 @@ global CorePath := ""
 global CoreProcessName := ""
 global ConfigPath := ""
 global ConfigURL := ""
-global APIController := "127.0.0.1:9090"
+global APIController := ""
 global APISecret := ""
-global ProxyPort := "7892"
-global WebUIPath := "ui"
+global ProxyPort := ""
+global WebUIPath := ""
 global WebUIName := ""
 global AutoStartCore := true
 
@@ -83,10 +85,7 @@ LoadConfig() {
         SplitPath(CorePath, &CoreProcessName)
     }
 
-    ; Read API section (for backward compatibility, will be overridden by config file)
-    APISecret := IniRead(ConfigFile, "API", "Secret", "")
-
-    ; Read Settings section (removed auto-enable options)
+    ; Read Settings section
     AutoStartCore := IniRead(ConfigFile, "Settings", "AutoStartCore", "1") = "1"
 
     ; Parse mihomo config file if exists to get API settings
@@ -109,10 +108,6 @@ ConfigPath=
 
 ; Remote config URL (optional, takes precedence over ConfigPath)
 ConfigURL=
-
-[API]
-; API secret (auto-detected from mihomo config, can override here)
-Secret=
 
 [Settings]
 ; Auto-start mihomo on script launch (1=yes, 0=no)
@@ -161,9 +156,6 @@ ParseMihomoConfig(configPath) {
 ; Tray Menu Setup
 ;==============================================================================
 SetupTrayMenu() {
-    ; Set default icon (off state)
-    UpdateTrayIcon()
-
     ; Remove default menu items
     A_TrayMenu.Delete()
 
@@ -363,9 +355,6 @@ RefreshAllStatus() {
 
     ; Update menu
     UpdateMenuStates()
-
-    ; Update tray icon based on status
-    UpdateTrayIcon()
 }
 
 ;==============================================================================
@@ -466,25 +455,43 @@ StopMihomo() {
         return
     }
 
-    ; Try to close by PID first
-    if (MihomoProcess && ProcessExist(MihomoProcess)) {
-        ProcessClose(MihomoProcess)
-    }
-
-    ; Also close any mihomo processes by name
+    ; 尝试关闭进程(先用进程名,更可靠)
     if (CoreProcessName && ProcessExist(CoreProcessName)) {
         ProcessClose(CoreProcessName)
+
+        ; 等待进程退出(最多等待3秒)
+        waitCount := 0
+        while (ProcessExist(CoreProcessName) && waitCount < 30) {
+            Sleep(100)
+            waitCount++
+        }
     }
 
-    MihomoProcess := 0
+    ; 如果进程名关闭失败,尝试用 PID 关闭
+    if (MihomoProcess && ProcessExist(MihomoProcess)) {
+        ProcessClose(MihomoProcess)
 
-    ; Reset proxy and TUN status when core stops
+        ; 再次等待
+        waitCount := 0
+        while (ProcessExist(MihomoProcess) && waitCount < 30) {
+            Sleep(100)
+            waitCount++
+        }
+    }
+
+    ; 验证是否成功关闭
+    if (IsMihomoRunning()) {
+        ShowNotification("错误", "无法停止 mihomo 内核,请手动结束进程", 3)
+        return
+    }
+
+    ; 成功关闭,重置状态
+    MihomoProcess := 0
     IsProxyEnabled := false
     IsTUNEnabled := false
 
-    ; Update menu and icon
+    ; 更新菜单
     UpdateMenuStates()
-    UpdateTrayIcon()
 
     ShowNotification("停止", "mihomo 内核已停止", 2)
 }
@@ -566,7 +573,6 @@ EnableSystemProxy() {
 
         IsProxyEnabled := true
         UpdateMenuStates()
-        UpdateTrayIcon()
         ShowNotification("系统代理", "系统代理已启用 (端口: " . ProxyPort . ")", 2)
     } catch as err {
         ShowNotification("错误", "启用系统代理失败: " . err.Message, 3)
@@ -587,7 +593,6 @@ DisableSystemProxy() {
 
         IsProxyEnabled := false
         UpdateMenuStates()
-        UpdateTrayIcon()
         ShowNotification("系统代理", "系统代理已禁用", 2)
     } catch as err {
         ShowNotification("错误", "禁用系统代理失败: " . err.Message, 3)
@@ -671,7 +676,6 @@ EnableTUNMode() {
                 ; Verify the change
                 if (GetTUNStatusFromAPI() && IsTUNEnabled) {
                     UpdateMenuStates()
-                    UpdateTrayIcon()
                     ShowNotification("TUN 模式", "TUN 模式已启用", 2)
                     return true
                 }
@@ -727,7 +731,6 @@ DisableTUNMode() {
                 ; Verify the change
                 if (GetTUNStatusFromAPI() && !IsTUNEnabled) {
                     UpdateMenuStates()
-                    UpdateTrayIcon()
                     ShowNotification("TUN 模式", "TUN 模式已禁用", 2)
                     return true
                 }
@@ -799,20 +802,4 @@ DisableAutoStartup() {
 ShowNotification(title, message, duration := 3) {
     TrayTip(message, title, 0x1)
     SetTimer(() => TrayTip(), -duration * 1000)
-}
-
-UpdateTrayIcon() {
-    global IsProxyEnabled, IsTUNEnabled
-
-    ; 如果系统代理或TUN模式任意一个开启，使用 mitray-on.ico，否则使用 mitray.ico
-    if (IsProxyEnabled || IsTUNEnabled) {
-        iconPath := A_ScriptDir "\mitray-on.ico"
-    } else {
-        iconPath := A_ScriptDir "\mitray.ico"
-    }
-
-    ; 如果图标文件存在则设置，否则使用默认图标
-    if (FileExist(iconPath)) {
-        TraySetIcon(iconPath)
-    }
 }
