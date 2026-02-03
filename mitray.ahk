@@ -825,29 +825,78 @@ EnableAutoStartup(level := "normal") {
         ; 获取可执行文件路径
         exePath := A_IsCompiled ? A_ScriptFullPath : A_ScriptFullPath
 
-        ; 根据权限级别设置不同的参数
-        if (level = "admin") {
-            ; 创建以最高权限运行的任务
-            cmd := 'schtasks /Create /TN "' . ScriptBaseName . '" '
-                . '/TR "\"' . exePath . '\"" '
-                . '/SC ONLOGON '
-                . '/RL HIGHEST '
-                . '/F'
+        ; 获取当前用户名
+        userName := A_UserName
 
-            levelText := "管理员权限"
-        } else {
-            ; 创建普通权限运行的任务
-            cmd := 'schtasks /Create /TN "' . ScriptBaseName . '" '
-                . '/TR "\"' . exePath . '\"" '
-                . '/SC ONLOGON '
-                . '/RL LIMITED '
-                . '/F'
+        ; 设置权限级别
+        runLevel := (level = "admin") ? "HighestAvailable" : "LeastPrivilege"
+        levelText := (level = "admin") ? "管理员权限" : "普通权限"
 
-            levelText := "普通权限"
+        ; 创建临时 XML 文件路径
+        xmlPath := A_Temp . "\mitray_task.xml"
+
+        ; 生成 XML 配置内容
+        xmlContent := '
+(
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>MiTray 开机自启动</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>' . userName . '</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>' . userName . '</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>' . runLevel . '</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>false</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>' . exePath . '</Command>
+    </Exec>
+  </Actions>
+</Task>
+)'
+
+        ; 写入 XML 文件
+        if FileExist(xmlPath) {
+            FileDelete(xmlPath)
         }
+        FileAppend(xmlContent, xmlPath, "UTF-16")
 
-        ; 执行命令
+        ; 使用 XML 文件创建任务
+        cmd := 'schtasks /Create /TN "' . ScriptBaseName . '" /XML "' . xmlPath . '" /F'
         result := RunWaitOne(cmd)
+
+        ; 删除临时 XML 文件
+        if FileExist(xmlPath) {
+            FileDelete(xmlPath)
+        }
 
         ; 检查是否成功
         if (InStr(result, "SUCCESS") || InStr(result, "成功")) {
