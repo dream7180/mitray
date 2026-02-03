@@ -4,7 +4,10 @@
 ; Description: Manage mihomo core with system tray interface
 ;==============================================================================
 
-;@Ahk2Exe-SetMainIcon mitray.ico
+;@Ahk2Exe-SetMainIcon %A_ScriptName~\.[^.]+$~.ico%
+;@Ahk2Exe-SetName %A_ScriptName~\.[^.]+$~~%
+;@Ahk2Exe-SetVersion 1.0.0
+;@Ahk2Exe-ExeName %A_ScriptName~\.[^.]+$~.exe%
 
 #Requires AutoHotkey v2.0+
 #SingleInstance Force
@@ -13,6 +16,9 @@ Persistent
 ;==============================================================================
 ; Global Variables
 ;==============================================================================
+; 获取脚本基础名称(不含扩展名),用于注册表和程序标识
+global ScriptBaseName := RegExReplace(A_ScriptName, "\.[^.]+$", "")
+
 global MihomoProcess := 0
 global ConfigFile := A_ScriptDir "\config.ini"
 global MihomoConfigFile := ""
@@ -73,6 +79,9 @@ LoadConfig() {
     ; Create default config if not exists
     if (!FileExist(ConfigFile)) {
         CreateDefaultConfig()
+        ShowNotification("首次运行", "已创建默认配置文件 config.ini`n请编辑配置文件后重新运行程序", 3)
+        Sleep(3000)  ; 等待通知显示
+        ExitApp()
     }
 
     ; Read Mihomo section
@@ -405,14 +414,14 @@ StartMihomo() {
         ; Download config from URL
         ShowNotification("下载配置", "正在从 URL 下载配置文件...", 2)
         if (!DownloadConfig(ConfigURL, TempConfigFile)) {
-            ShowNotification("错误", "下载配置文件失败", 3)
+            ShowNotification("错误", "下载配置文件失败", 2)
             return false
         }
         MihomoConfigFile := TempConfigFile
     } else if (ConfigPath) {
         MihomoConfigFile := ConfigPath
     } else {
-        ShowNotification("错误", "未配置本地配置文件或远程 URL`n请编辑 config.ini", 3)
+        ShowNotification("错误", "未配置本地配置文件或远程 URL`n请编辑 config.ini", 2)
         return false
     }
 
@@ -438,11 +447,11 @@ StartMihomo() {
             ShowNotification("启动成功", "mihomo 内核已启动", 2)
             return true
         } else {
-            ShowNotification("错误", "mihomo 启动失败", 3)
+            ShowNotification("错误", "mihomo 启动失败", 2)
             return false
         }
     } catch as err {
-        ShowNotification("错误", "启动 mihomo 失败: " . err.Message, 3)
+        ShowNotification("错误", "启动 mihomo 失败: " . err.Message, 2)
         return false
     }
 }
@@ -575,7 +584,7 @@ EnableSystemProxy() {
         UpdateMenuStates()
         ShowNotification("系统代理", "系统代理已启用 (端口: " . ProxyPort . ")", 2)
     } catch as err {
-        ShowNotification("错误", "启用系统代理失败: " . err.Message, 3)
+        ShowNotification("错误", "启用系统代理失败: " . err.Message, 2)
     }
 }
 
@@ -595,7 +604,7 @@ DisableSystemProxy() {
         UpdateMenuStates()
         ShowNotification("系统代理", "系统代理已禁用", 2)
     } catch as err {
-        ShowNotification("错误", "禁用系统代理失败: " . err.Message, 3)
+        ShowNotification("错误", "禁用系统代理失败: " . err.Message, 2)
     }
 }
 
@@ -647,7 +656,7 @@ EnableTUNMode() {
 
     ; Ensure mihomo is running
     if (!IsMihomoRunning()) {
-        ShowNotification("错误", "mihomo 未运行", 3)
+        ShowNotification("错误", "mihomo 未运行", 2)
         return false
     }
 
@@ -691,9 +700,9 @@ EnableTUNMode() {
     }
 
     if (!A_IsAdmin) {
-        ShowNotification("权限不足", "TUN 模式需要管理员权限`n请退出程序后选择「以管理员身份运行」", 5)
+        ShowNotification("权限不足", "TUN 模式需要管理员权限`n请退出程序后选择「以管理员身份运行」", 3)
     } else {
-        ShowNotification("错误", "启用 TUN 模式失败，请检查 mihomo API 是否正常", 3)
+        ShowNotification("错误", "启用 TUN 模式失败，请检查 mihomo API 是否正常", 2)
     }
     return false
 }
@@ -702,7 +711,7 @@ DisableTUNMode() {
     global IsTUNEnabled, APIController, APISecret
 
     if (!IsMihomoRunning()) {
-        ShowNotification("错误", "mihomo 未运行", 3)
+        ShowNotification("错误", "mihomo 未运行", 2)
         return false
     }
 
@@ -753,10 +762,10 @@ DisableTUNMode() {
 ; Auto-startup Management
 ;==============================================================================
 CheckAutoStartup() {
-    global IsAutoStartup
+    global IsAutoStartup, ScriptBaseName
 
     try {
-        regValue := RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "ClashTray")
+        regValue := RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\Run", ScriptBaseName)
         IsAutoStartup := true
     } catch {
         IsAutoStartup := false
@@ -766,40 +775,40 @@ CheckAutoStartup() {
 }
 
 EnableAutoStartup() {
-    global IsAutoStartup
+    global IsAutoStartup, ScriptBaseName
 
     try {
         ; Get executable path (if compiled) or script path
         exePath := A_IsCompiled ? A_ScriptFullPath : A_ScriptFullPath
 
-        RegWrite('"' . exePath . '"', "REG_SZ", "HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "ClashTray")
+        RegWrite('"' . exePath . '"', "REG_SZ", "HKCU\Software\Microsoft\Windows\CurrentVersion\Run", ScriptBaseName)
 
         IsAutoStartup := true
         UpdateMenuStates()
         ShowNotification("开机自启", "已启用开机自启动", 2)
     } catch as err {
-        ShowNotification("错误", "启用开机自启失败: " . err.Message, 3)
+        ShowNotification("错误", "启用开机自启失败: " . err.Message, 2)
     }
 }
 
 DisableAutoStartup() {
-    global IsAutoStartup
+    global IsAutoStartup, ScriptBaseName
 
     try {
-        RegDelete("HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "ClashTray")
+        RegDelete("HKCU\Software\Microsoft\Windows\CurrentVersion\Run", ScriptBaseName)
 
         IsAutoStartup := false
         UpdateMenuStates()
         ShowNotification("开机自启", "已禁用开机自启动", 2)
     } catch as err {
-        ShowNotification("错误", "禁用开机自启失败: " . err.Message, 3)
+        ShowNotification("错误", "禁用开机自启失败: " . err.Message, 2)
     }
 }
 
 ;==============================================================================
 ; Utility Functions
 ;==============================================================================
-ShowNotification(title, message, duration := 3) {
+ShowNotification(title, message, duration := 2) {
     TrayTip(message, title, 0x1)
     SetTimer(() => TrayTip(), -duration * 1000)
 }
