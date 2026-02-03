@@ -4,7 +4,7 @@
 ; Description: Manage mihomo core with system tray interface
 ;==============================================================================
 
-;@Ahk2Exe-SetMainIcon idle.ico
+;@Ahk2Exe-SetMainIcon mitray.ico
 
 #Requires AutoHotkey v2.0+
 #SingleInstance Force
