@@ -790,15 +790,16 @@ CheckAutoStartup() {
     global IsAutoStartup, AutoStartupLevel, ScriptBaseName
 
     try {
-        ; 检查任务计划程序中是否存在任务
-        cmd := 'schtasks /Query /TN "' . ScriptBaseName . '" /FO LIST /V'
+        cmd := 'schtasks /Query /TN "' . ScriptBaseName . '" 2>nul'
         result := RunWaitOne(cmd)
 
         if (InStr(result, ScriptBaseName)) {
             IsAutoStartup := true
 
-            ; 检查是否以最高权限运行
-            if (InStr(result, "Highest") || InStr(result, "最高权限")) {
+            cmd := 'schtasks /Query /TN "' . ScriptBaseName . '" /XML'
+            xmlResult := RunWaitOne(cmd)
+
+            if (InStr(xmlResult, "<RunLevel>HighestAvailable</RunLevel>")) {
                 AutoStartupLevel := "admin"
             } else {
                 AutoStartupLevel := "normal"
@@ -831,7 +832,7 @@ EnableAutoStartup(level := "normal") {
 
         ; 生成 XML 内容（路径需要 XML 转义）
         exePathEscaped := XmlEscape(exePath)
-        
+
         xmlContent := '<?xml version="1.0" encoding="UTF-16"?>'
             . '`r`n<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">'
             . '`r`n  <RegistrationInfo>'
@@ -876,15 +877,15 @@ EnableAutoStartup(level := "normal") {
 
         ; 创建临时 XML 文件
         tempXmlPath := A_Temp . '\schtask_' . ScriptBaseName . '_' . A_TickCount . '.xml'
-        
+
         ; 使用 FileAppend（自动处理 UTF-16 BOM）
         try {
             FileDelete(tempXmlPath)  ; 确保文件不存在
         }
-        
+
         ; 写入文件，使用 UTF-16 编码
         FileAppend(xmlContent, tempXmlPath, "UTF-16")
-        
+
         ; 验证文件是否创建成功
         if (!FileExist(tempXmlPath)) {
             ShowNotification("错误", "无法创建临时 XML 文件", 2)
