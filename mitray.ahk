@@ -784,7 +784,7 @@ DisableTUNMode() {
 }
 
 ;==============================================================================
-; Auto-startup Management (使用任务计划程序)
+; Auto-startup Management (使用任务计划程序 + XML)
 ;==============================================================================
 CheckAutoStartup() {
     global IsAutoStartup, AutoStartupLevel, ScriptBaseName
@@ -825,43 +825,104 @@ EnableAutoStartup(level := "normal") {
         ; 获取可执行文件路径
         exePath := A_IsCompiled ? A_ScriptFullPath : A_ScriptFullPath
 
-        ; 设置权限级别
-        runLevel := (level = "admin") ? "Highest" : "Limited"
+        ; 根据权限级别设置 RunLevel
+        runLevel := (level = "admin") ? "HighestAvailable" : "LeastPrivilege"
         levelText := (level = "admin") ? "管理员权限" : "普通权限"
 
-        ; 构建 PowerShell 脚本
-        ; 使用 Register-ScheduledTask cmdlet 创建任务
-        psScript := '
-(
-$action = New-ScheduledTaskAction -Execute "' . exePath . '"
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -DontStopOnIdleEnd `
-    -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
-    -AllowStartOnDemand
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel ' . runLevel . '
-Register-ScheduledTask -TaskName "' . ScriptBaseName . '" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
-if ($?) { Write-Output "SUCCESS" } else { Write-Output "FAILED" }
-)'
+        ; 生成 XML 内容（路径需要 XML 转义）
+        exePathEscaped := XmlEscape(exePath)
+        
+        xmlContent := '<?xml version="1.0" encoding="UTF-16"?>'
+            . '`r`n<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">'
+            . '`r`n  <RegistrationInfo>'
+            . '`r`n    <URI>\' . ScriptBaseName . '</URI>'
+            . '`r`n  </RegistrationInfo>'
+            . '`r`n  <Triggers>'
+            . '`r`n    <LogonTrigger>'
+            . '`r`n      <Enabled>true</Enabled>'
+            . '`r`n    </LogonTrigger>'
+            . '`r`n  </Triggers>'
+            . '`r`n  <Principals>'
+            . '`r`n    <Principal id="Author">'
+            . '`r`n      <LogonType>InteractiveToken</LogonType>'
+            . '`r`n      <RunLevel>' . runLevel . '</RunLevel>'
+            . '`r`n    </Principal>'
+            . '`r`n  </Principals>'
+            . '`r`n  <Settings>'
+            . '`r`n    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>'
+            . '`r`n    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>'
+            . '`r`n    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>'
+            . '`r`n    <AllowHardTerminate>false</AllowHardTerminate>'
+            . '`r`n    <StartWhenAvailable>false</StartWhenAvailable>'
+            . '`r`n    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>'
+            . '`r`n    <IdleSettings>'
+            . '`r`n      <StopOnIdleEnd>false</StopOnIdleEnd>'
+            . '`r`n      <RestartOnIdle>false</RestartOnIdle>'
+            . '`r`n    </IdleSettings>'
+            . '`r`n    <AllowStartOnDemand>true</AllowStartOnDemand>'
+            . '`r`n    <Enabled>true</Enabled>'
+            . '`r`n    <Hidden>false</Hidden>'
+            . '`r`n    <RunOnlyIfIdle>false</RunOnlyIfIdle>'
+            . '`r`n    <WakeToRun>false</WakeToRun>'
+            . '`r`n    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>'
+            . '`r`n    <Priority>7</Priority>'
+            . '`r`n  </Settings>'
+            . '`r`n  <Actions Context="Author">'
+            . '`r`n    <Exec>'
+            . '`r`n      <Command>' . exePathEscaped . '</Command>'
+            . '`r`n    </Exec>'
+            . '`r`n  </Actions>'
+            . '`r`n</Task>'
 
-        ; 执行 PowerShell 命令
-        cmd := 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "' . psScript . '"'
+        ; 创建临时 XML 文件
+        tempXmlPath := A_Temp . '\schtask_' . ScriptBaseName . '_' . A_TickCount . '.xml'
+        
+        ; 使用 FileAppend（自动处理 UTF-16 BOM）
+        try {
+            FileDelete(tempXmlPath)  ; 确保文件不存在
+        }
+        
+        ; 写入文件，使用 UTF-16 编码
+        FileAppend(xmlContent, tempXmlPath, "UTF-16")
+        
+        ; 验证文件是否创建成功
+        if (!FileExist(tempXmlPath)) {
+            ShowNotification("错误", "无法创建临时 XML 文件", 2)
+            return
+        }
+
+        ; 使用 XML 文件创建任务
+        cmd := 'schtasks /Create /TN "' . ScriptBaseName . '" '
+            . '/XML "' . tempXmlPath . '" '
+            . '/F'
+
+        ; 执行命令并获取输出
         result := RunWaitOne(cmd)
 
+        ; 删除临时文件
+        try {
+            FileDelete(tempXmlPath)
+        } catch {
+            ; 忽略删除失败
+        }
+
         ; 检查是否成功
-        if (InStr(result, "SUCCESS")) {
+        if (InStr(result, "SUCCESS") || InStr(result, "成功") || InStr(result, "已成功")) {
             IsAutoStartup := true
             AutoStartupLevel := level
             UpdateMenuStates()
             ShowNotification("开机自启", "已启用开机自启动 (" . levelText . ")", 2)
         } else {
-            ShowNotification("错误", "启用开机自启失败`n" . result, 5)
+            ; 显示详细错误信息
+            ShowNotification("错误", "启用开机自启失败`n`n" . result, 5)
         }
     } catch as err {
-        ShowNotification("错误", "启用开机自启失败: " . err.Message, 2)
+        ; 确保删除临时文件
+        try {
+            if (FileExist(tempXmlPath))
+                FileDelete(tempXmlPath)
+        }
+        ShowNotification("错误", "启用开机自启失败: " . err.Message, 3)
     }
 }
 
@@ -905,4 +966,14 @@ RunWaitOne(command) {
     output := exec.StdOut.ReadAll()
 
     return output
+}
+
+; XML 转义函数
+XmlEscape(str) {
+    str := StrReplace(str, "&", "&amp;")
+    str := StrReplace(str, "<", "&lt;")
+    str := StrReplace(str, ">", "&gt;")
+    str := StrReplace(str, '"', "&quot;")
+    str := StrReplace(str, "'", "&apos;")
+    return str
 }
