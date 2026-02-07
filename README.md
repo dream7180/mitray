@@ -4,14 +4,13 @@ A tray to manage mihomo core on windows.
 
 ## Features
 
-- Start/Stop mihomo core
+- Restart/Stop mihomo core
 - Enable/Disable system proxy
 - Enable/Disable TUN mode
-- Check mihomo status
+- Refresh mihomo status
 - Open mihomo webui
 - Open mihomo directory
-- Auto start mihomo on startup
-- Auto detect mihomo status
+- Auto start on startup (or with administrator)
 
 ## Usage
 
