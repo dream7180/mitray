@@ -841,6 +841,7 @@ EnableAutoStartup(level := "normal") {
             . '`r`n  <Triggers>'
             . '`r`n    <LogonTrigger>'
             . '`r`n      <Enabled>true</Enabled>'
+            . '`r`n      <Delay>PT15S</Delay>'
             . '`r`n    </LogonTrigger>'
             . '`r`n  </Triggers>'
             . '`r`n  <Principals>'
