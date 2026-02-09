@@ -58,6 +58,12 @@ if (AutoStartCore) {
         ; Wait for core to be fully ready
         Sleep(3000)
 
+        ; Get initial TUN status from API before starting monitoring
+        GetTUNStatusFromAPI()
+
+        ; Update menu to reflect current state
+        UpdateMenuStates()
+
         ; Start status monitoring
         StartStatusMonitoring()
     }
@@ -66,6 +72,13 @@ if (AutoStartCore) {
     if (CoreProcessName && ProcessExist(CoreProcessName)) {
         MihomoProcess := ProcessExist(CoreProcessName)
         ShowNotification("检测到运行", "检测到 mihomo 已在运行", 2)
+
+        ; Get initial TUN status from API
+        GetTUNStatusFromAPI()
+
+        ; Update menu to reflect current state
+        UpdateMenuStates()
+
         StartStatusMonitoring()
     }
 }
