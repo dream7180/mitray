@@ -160,32 +160,57 @@ ParseMihomoConfig(configPath) {
 
     try {
         content := FileRead(configPath)
+        hasMixedPort := false
 
-        ; Parse external-controller (keep as full address)
-        if (RegExMatch(content, "im)^external-controller:\s*([^\r\n]+)", &match)) {
-            APIController := Trim(match[1])
-        }
+        loop parse, content, "`n", "`r" {
+            line := A_LoopField
 
-        ; Parse secret
-        if (RegExMatch(content, "secret:\s*([^\r\n]+)", &match)) {
-            APISecret := Trim(match[1])
-        }
+            if (A_Index = 1) {
+                line := RegExReplace(line, "^\x{FEFF}")
+            }
 
-        ; Parse external-ui (local path)
-        if (RegExMatch(content, "im)^external-ui:\s*([^\r\n]+)", &match)) {
-            WebUIPath := Trim(match[1])
-        }
+            if (!line) {
+                continue
+            }
 
-        ; Parse external-ui-name (folder name)
-        if (RegExMatch(content, "im)^external-ui-name:\s*([^\r\n]+)", &match)) {
-            WebUIName := Trim(match[1])
-        }
+            lineTrimLeft := LTrim(line)
+            if (!lineTrimLeft || SubStr(lineTrimLeft, 1, 1) = "#" || SubStr(lineTrimLeft, 1, 1) = ";") {
+                continue
+            }
 
-        ; Parse proxy port (try mixed-port first, then port)
-        if (RegExMatch(content, "im)^mixed-port:\s*(\d+)", &match)) {
-            ProxyPort := match[1]
-        } else if (RegExMatch(content, "im)^port:\s*(\d+)", &match)) {
-            ProxyPort := match[1]
+            ; Parse top-level scalar keys only, avoid nested YAML blocks
+            if (line != LTrim(line, " `t")) {
+                continue
+            }
+
+            if (!RegExMatch(line, "^([A-Za-z0-9_-]+)\s*:\s*(.*)$", &kv)) {
+                continue
+            }
+
+            key := kv[1]
+            value := ParseYamlValue(kv[2])
+
+            switch key {
+                case "external-controller":
+                    if (value != "") {
+                        APIController := value
+                    }
+                case "secret":
+                    APISecret := value
+                case "external-ui":
+                    WebUIPath := value
+                case "external-ui-name":
+                    WebUIName := value
+                case "mixed-port":
+                    if (IsValidPort(value)) {
+                        ProxyPort := value
+                        hasMixedPort := true
+                    }
+                case "port":
+                    if (!hasMixedPort && IsValidPort(value)) {
+                        ProxyPort := value
+                    }
+            }
         }
     }
 }
@@ -831,13 +856,13 @@ CheckAutoStartup() {
         cmd := 'schtasks /Query /TN "' . ScriptBaseName . '" 2>nul'
         result := RunWaitOne(cmd)
 
-        if (InStr(result, ScriptBaseName)) {
+        if (result.ExitCode = 0 && InStr(result.StdOut, ScriptBaseName)) {
             IsAutoStartup := true
 
             cmd := 'schtasks /Query /TN "' . ScriptBaseName . '" /XML'
             xmlResult := RunWaitOne(cmd)
 
-            if (InStr(xmlResult, "<RunLevel>HighestAvailable</RunLevel>")) {
+            if (xmlResult.ExitCode = 0 && InStr(xmlResult.StdOut, "<RunLevel>HighestAvailable</RunLevel>")) {
                 AutoStartupLevel := "admin"
             } else {
                 AutoStartupLevel := "normal"
@@ -948,14 +973,14 @@ EnableAutoStartup(level := "normal") {
         }
 
         ; 检查是否成功
-        if (InStr(result, "SUCCESS") || InStr(result, "成功") || InStr(result, "已成功")) {
+        if (result.ExitCode = 0) {
             IsAutoStartup := true
             AutoStartupLevel := level
             UpdateMenuStates()
             ShowNotification("开机自启", "已启用开机自启动 (" . levelText . ")", 2)
         } else {
             ; 显示详细错误信息
-            ShowNotification("错误", "启用开机自启失败`n`n" . result, 5)
+            ShowNotification("错误", "启用开机自启失败`n`n" . GetCommandMessage(result), 5)
         }
     } catch as err {
         ; 确保删除临时文件
@@ -980,7 +1005,7 @@ DisableAutoStartup() {
         UpdateMenuStates()
 
         ; 只有在任务存在时才显示成功通知
-        if (InStr(result, "SUCCESS") || InStr(result, "成功")) {
+        if (result.ExitCode = 0) {
             ShowNotification("开机自启", "已禁用开机自启动", 2)
         }
     } catch as err {
@@ -1003,10 +1028,16 @@ RunWaitOne(command) {
     shell := ComObject("WScript.Shell")
     exec := shell.Exec(A_ComSpec " /C " . command)
 
-    ; 等待命令完成并读取输出
-    output := exec.StdOut.ReadAll()
+    ; Wait for process completion, then read outputs and exit code
+    while (exec.Status = 0) {
+        Sleep(30)
+    }
 
-    return output
+    return {
+        StdOut: exec.StdOut.ReadAll(),
+        StdErr: exec.StdErr.ReadAll(),
+        ExitCode: exec.ExitCode
+    }
 }
 
 ; XML 转义函数
@@ -1026,4 +1057,30 @@ IsValidPort(port) {
 
     portNum := port + 0
     return portNum >= 1 && portNum <= 65535
+}
+
+ParseYamlValue(rawValue) {
+    value := RegExReplace(rawValue, "\s+#.*$")
+    value := Trim(value)
+
+    ; Remove matching surrounding quotes if present
+    if (RegExMatch(value, "^([""''])(.*)\1$", &quoted)) {
+        value := quoted[2]
+    }
+
+    return Trim(value)
+}
+
+GetCommandMessage(result) {
+    msg := Trim(result.StdErr)
+    if (!msg) {
+        msg := Trim(result.StdOut)
+    }
+    if (!msg) {
+        msg := "ExitCode: " . result.ExitCode
+    }
+    if (StrLen(msg) > 220) {
+        msg := SubStr(msg, 1, 220) . "..."
+    }
+    return msg
 }
