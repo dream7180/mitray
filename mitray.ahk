@@ -35,6 +35,7 @@ global ProxyPort := ""
 global WebUIPath := ""
 global WebUIName := ""
 global AutoStartCore := true
+global AutoStartupDelaySec := 15
 
 ; State
 global IsProxyEnabled := false
@@ -43,6 +44,7 @@ global IsAutoStartup := false
 global AutoStartupLevel := ""  ; "normal" 或 "admin"
 global AutoStartupMenu := 0  ; 开机自启子菜单对象
 global StatusCheckTimer := 0
+global StatusTimerCallback := 0
 
 ;==============================================================================
 ; Initialization
@@ -111,6 +113,15 @@ LoadConfig() {
 
     ; Read Settings section
     AutoStartCore := IniRead(ConfigFile, "Settings", "AutoStartCore", "1") = "1"
+    delayValue := IniRead(ConfigFile, "Settings", "AutoStartupDelaySec", "15")
+    if (RegExMatch(delayValue, "^\d+$")) {
+        AutoStartupDelaySec := delayValue + 0
+        if (AutoStartupDelaySec > 600) {
+            AutoStartupDelaySec := 600
+        }
+    } else {
+        AutoStartupDelaySec := 15
+    }
 
     ; Parse mihomo config file if exists to get API settings
     if (ConfigPath && FileExist(ConfigPath)) {
@@ -136,6 +147,9 @@ ConfigURL=
 [Settings]
 ; Auto-start mihomo on script launch (1=yes, 0=no)
 AutoStartCore=1
+
+; Delay (seconds) before auto-start task runs after user logon (0-600)
+AutoStartupDelaySec=15
 )"
 
     FileAppend(configContent, ConfigFile)
@@ -366,7 +380,7 @@ MenuExitProgram(*) {
 ; Status Monitoring
 ;==============================================================================
 StartStatusMonitoring() {
-    global StatusCheckTimer
+    global StatusCheckTimer, StatusTimerCallback
 
     ; Stop existing timer if any
     StopStatusMonitoring()
@@ -374,15 +388,21 @@ StartStatusMonitoring() {
     ; Refresh status immediately
     RefreshAllStatus()
 
+    ; Reuse the same callback object so SetTimer can always stop it reliably
+    if (!StatusTimerCallback) {
+        StatusTimerCallback := RefreshAllStatus
+    }
+
     ; Set up periodic status check (every 5 seconds)
-    StatusCheckTimer := SetTimer(RefreshAllStatus, 5000)
+    SetTimer(StatusTimerCallback, 5000)
+    StatusCheckTimer := 1
 }
 
 StopStatusMonitoring() {
-    global StatusCheckTimer
+    global StatusCheckTimer, StatusTimerCallback
 
-    if (StatusCheckTimer) {
-        SetTimer(StatusCheckTimer, 0)
+    if (StatusCheckTimer && StatusTimerCallback) {
+        SetTimer(StatusTimerCallback, 0)
         StatusCheckTimer := 0
     }
 }
@@ -495,7 +515,7 @@ StartMihomo() {
 }
 
 StopMihomo() {
-    global MihomoProcess, CoreProcessName, IsProxyEnabled, IsTUNEnabled
+    global MihomoProcess, CoreProcessName, IsTUNEnabled
 
     if (!IsMihomoRunning()) {
         ShowNotification("提示", "mihomo 未在运行", 2)
@@ -534,10 +554,10 @@ StopMihomo() {
 
     ; 成功关闭,重置状态
     MihomoProcess := 0
-    IsProxyEnabled := false
     IsTUNEnabled := false
 
-    ; 更新菜单
+    ; Refresh proxy state from system instead of forcing a local flag
+    CheckSystemProxyState()
     UpdateMenuStates()
 
     ShowNotification("停止", "mihomo 内核已停止", 2)
@@ -604,6 +624,11 @@ CheckSystemProxyState() {
 
 EnableSystemProxy() {
     global IsProxyEnabled, ProxyPort
+
+    if (!IsValidPort(ProxyPort)) {
+        ShowNotification("错误", "代理端口无效，请检查 mihomo 配置中的 mixed-port/port", 3)
+        return
+    }
 
     try {
         ; Set registry values
@@ -830,7 +855,7 @@ CheckAutoStartup() {
 }
 
 EnableAutoStartup(level := "normal") {
-    global IsAutoStartup, AutoStartupLevel, ScriptBaseName
+    global IsAutoStartup, AutoStartupLevel, ScriptBaseName, AutoStartupDelaySec
 
     try {
         ; 先删除已存在的任务（如果有）
@@ -842,6 +867,7 @@ EnableAutoStartup(level := "normal") {
         ; 根据权限级别设置 RunLevel
         runLevel := (level = "admin") ? "HighestAvailable" : "LeastPrivilege"
         levelText := (level = "admin") ? "管理员权限" : "普通权限"
+        delayIso := "PT" . AutoStartupDelaySec . "S"
 
         ; 生成 XML 内容（路径需要 XML 转义）
         exePathEscaped := XmlEscape(exePath)
@@ -854,7 +880,7 @@ EnableAutoStartup(level := "normal") {
             . '`r`n  <Triggers>'
             . '`r`n    <LogonTrigger>'
             . '`r`n      <Enabled>true</Enabled>'
-            . '`r`n      <Delay>PT15S</Delay>'
+            . '`r`n      <Delay>' . delayIso . '</Delay>'
             . '`r`n    </LogonTrigger>'
             . '`r`n  </Triggers>'
             . '`r`n  <Principals>'
@@ -991,4 +1017,13 @@ XmlEscape(str) {
     str := StrReplace(str, '"', "&quot;")
     str := StrReplace(str, "'", "&apos;")
     return str
+}
+
+IsValidPort(port) {
+    if (!RegExMatch(port, "^\d+$")) {
+        return false
+    }
+
+    portNum := port + 0
+    return portNum >= 1 && portNum <= 65535
 }
