@@ -189,9 +189,9 @@ ParseMihomoConfig(configPath) {
         }
 
         ; Parse proxy port (try mixed-port first, then port)
-        if (RegExMatch(content, "im)^\s*mixed-port\s*:\s*[""`']?(\d+)[""`']?\s*(?:#.*)?$", &match)) {
+        if (RegExMatch(content, "im)^\s*mixed-port\s*:\s*(?:\x22|')?(\d+)(?:\x22|')?\s*(?:#.*)?$", &match)) {
             ProxyPort := match[1]
-        } else if (RegExMatch(content, "im)^\s*port\s*:\s*[""`']?(\d+)[""`']?\s*(?:#.*)?$", &match)) {
+        } else if (RegExMatch(content, "im)^\s*port\s*:\s*(?:\x22|')?(\d+)(?:\x22|')?\s*(?:#.*)?$", &match)) {
             ProxyPort := match[1]
         }
     }
