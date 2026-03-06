@@ -159,32 +159,39 @@ ParseMihomoConfig(configPath) {
     global APIController, APISecret, ProxyPort, WebUIPath, WebUIName
 
     try {
+        ; Reset parsed values to avoid stale state when keys are removed.
+        APIController := ""
+        APISecret := ""
+        ProxyPort := ""
+        WebUIPath := ""
+        WebUIName := ""
+
         content := FileRead(configPath)
 
         ; Parse external-controller (keep as full address)
-        if (RegExMatch(content, "im)^external-controller:\s*([^\r\n]+)", &match)) {
-            APIController := Trim(match[1])
+        if (RegExMatch(content, "im)^\s*external-controller\s*:\s*([^\r\n]+)$", &match)) {
+            APIController := RegExReplace(Trim(match[1]), "\s+#.*$")
         }
 
         ; Parse secret
-        if (RegExMatch(content, "secret:\s*([^\r\n]+)", &match)) {
-            APISecret := Trim(match[1])
+        if (RegExMatch(content, "im)^\s*secret\s*:\s*([^\r\n]+)$", &match)) {
+            APISecret := RegExReplace(Trim(match[1]), "\s+#.*$")
         }
 
         ; Parse external-ui (local path)
-        if (RegExMatch(content, "im)^external-ui:\s*([^\r\n]+)", &match)) {
-            WebUIPath := Trim(match[1])
+        if (RegExMatch(content, "im)^\s*external-ui\s*:\s*([^\r\n]+)$", &match)) {
+            WebUIPath := RegExReplace(Trim(match[1]), "\s+#.*$")
         }
 
         ; Parse external-ui-name (folder name)
-        if (RegExMatch(content, "im)^external-ui-name:\s*([^\r\n]+)", &match)) {
-            WebUIName := Trim(match[1])
+        if (RegExMatch(content, "im)^\s*external-ui-name\s*:\s*([^\r\n]+)$", &match)) {
+            WebUIName := RegExReplace(Trim(match[1]), "\s+#.*$")
         }
 
         ; Parse proxy port (try mixed-port first, then port)
-        if (RegExMatch(content, "im)^mixed-port:\s*(\d+)", &match)) {
+        if (RegExMatch(content, "im)^\s*mixed-port\s*:\s*[""`']?(\d+)[""`']?\s*(?:#.*)?$", &match)) {
             ProxyPort := match[1]
-        } else if (RegExMatch(content, "im)^port:\s*(\d+)", &match)) {
+        } else if (RegExMatch(content, "im)^\s*port\s*:\s*[""`']?(\d+)[""`']?\s*(?:#.*)?$", &match)) {
             ProxyPort := match[1]
         }
     }
