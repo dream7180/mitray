@@ -12,6 +12,7 @@
 #Requires AutoHotkey v2.0+
 #SingleInstance Force
 Persistent
+OnError((*) => -1)  ; 捕获全局未处理异常,防止脚本意外退出
 
 ;==============================================================================
 ; Global Variables
@@ -400,8 +401,8 @@ StartStatusMonitoring() {
         StatusTimerCallback := RefreshAllStatus
     }
 
-    ; Set up periodic status check (every 5 seconds)
-    SetTimer(StatusTimerCallback, 5000)
+    ; Set up periodic status check (every 30 seconds)
+    SetTimer(StatusTimerCallback, 30000)
     StatusCheckTimer := 1
 }
 
@@ -415,20 +416,24 @@ StopStatusMonitoring() {
 }
 
 RefreshAllStatus() {
-    ; Check if mihomo is still running
-    if (!IsMihomoRunning()) {
-        StopStatusMonitoring()
-        return
+    try {
+        ; Check if mihomo is still running
+        if (!IsMihomoRunning()) {
+            StopStatusMonitoring()
+            return
+        }
+
+        ; Refresh system proxy state
+        CheckSystemProxyState()
+
+        ; Refresh TUN state from API
+        GetTUNStatusFromAPI()
+
+        ; Update menu
+        UpdateMenuStates()
+    } catch as err {
+        ; 防止定时器回调中的异常导致脚本崩溃
     }
-
-    ; Refresh system proxy state
-    CheckSystemProxyState()
-
-    ; Refresh TUN state from API
-    GetTUNStatusFromAPI()
-
-    ; Update menu
-    UpdateMenuStates()
 }
 
 ;==============================================================================
