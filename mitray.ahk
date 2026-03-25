@@ -5,6 +5,8 @@
 ;==============================================================================
 
 ;@Ahk2Exe-SetMainIcon %A_ScriptName~\.[^.]+$~.ico%
+;@Ahk2Exe-AddResource %A_ScriptName~\.[^.]+$~_on.ico%, 201
+;@Ahk2Exe-AddResource %A_ScriptName~\.[^.]+$~_off.ico%, 202
 ;@Ahk2Exe-SetName %A_ScriptName~\.[^.]+$~~%
 ;@Ahk2Exe-SetVersion 1.0.0
 ;@Ahk2Exe-ExeName %A_ScriptName~\.[^.]+$~.exe%
@@ -46,6 +48,9 @@ global AutoStartupLevel := ""  ; "normal" 或 "admin"
 global AutoStartupMenu := 0  ; 开机自启子菜单对象
 global StatusCheckTimer := 0
 global StatusTimerCallback := 0
+global TrayIconState := ""
+global TrayIconOnResourceId := 201
+global TrayIconOffResourceId := 202
 
 ;==============================================================================
 ; Initialization
@@ -198,6 +203,61 @@ ParseMihomoConfig(configPath) {
     }
 }
 
+UpdateTrayIcon() {
+    global TrayIconState
+
+    nextState := "default"
+    if (!IsMihomoRunning()) {
+        nextState := "off"
+    } else if (IsProxyEnabled || IsTUNEnabled) {
+        nextState := "on"
+    }
+
+    if (nextState = TrayIconState) {
+        return
+    }
+
+    if (ApplyTrayIcon(nextState)) {
+        TrayIconState := nextState
+    }
+}
+
+ApplyTrayIcon(state) {
+    global TrayIconOnResourceId, TrayIconOffResourceId
+
+    if (A_IsCompiled) {
+        switch state {
+            case "on":
+                TraySetIcon(A_ScriptFullPath, -TrayIconOnResourceId, true)
+            case "off":
+                TraySetIcon(A_ScriptFullPath, -TrayIconOffResourceId, true)
+            default:
+                TraySetIcon("*", , true)
+        }
+        return true
+    }
+
+    iconPath := A_ScriptDir . "\mitray.ico"
+    switch state {
+        case "on":
+            iconPath := A_ScriptDir . "\mitray_on.ico"
+        case "off":
+            iconPath := A_ScriptDir . "\mitray_off.ico"
+    }
+
+    if (!FileExist(iconPath)) {
+        iconPath := A_ScriptDir . "\mitray.ico"
+    }
+
+    if (!FileExist(iconPath)) {
+        TraySetIcon("*", , true)
+        return false
+    }
+
+    TraySetIcon(iconPath, 1, true)
+    return true
+}
+
 ;==============================================================================
 ; Tray Menu Setup
 ;==============================================================================
@@ -234,6 +294,8 @@ SetupTrayMenu() {
 }
 
 UpdateMenuStates() {
+    UpdateTrayIcon()
+
     ; Update proxy checkbox
     if (IsProxyEnabled) {
         A_TrayMenu.Check("启用系统代理")
