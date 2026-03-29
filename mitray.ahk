@@ -571,7 +571,7 @@ StartMihomo() {
 
     ; Start mihomo with working directory set to core directory
     try {
-        MihomoProcess := Run('"' . CorePath . '" -f "' . MihomoConfigFile . '"', coreDir, "Hide")
+        MihomoProcess := Run('"' . CorePath . '" -d ".\\" -f "' . MihomoConfigFile . '"', coreDir, "Hide")
         Sleep(2000)  ; Wait for startup
 
         ; Check if process started successfully
